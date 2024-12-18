@@ -1,0 +1,108 @@
+resources:
+  repositories:
+  - repository: self
+    type: git
+    ref: refs/heads/feature/keyvault
+jobs:
+- job: Job_1
+  displayName: Tflint and Checkov
+  pool:
+    name: Azure Pipelines
+  steps:
+  - checkout: self
+ steps:
+  - checkout: self
+    clean: False
+  - task: charleszipp.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-installer.TerraformInstaller@1
+    displayName: Use Terraform latest
+  - task: qetza.replacetokens.replacetokens-task.replacetokens@6
+    displayName: Replace tokens
+    inputs:
+      rootDirectory: tests
+      targetFiles: >-
+        env.tfvars
+        provider.tf
+      tokenPattern: doubleunderscores
+- task: Bash@3
+    displayName: Install tflint
+    inputs:
+      targetType: inline
+      script: curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+ - task: Bash@3
+    displayName: Run tflint
+    inputs:
+      targetType: inline
+      script: tflint --init
+      workingDirectory: tests
+ - task: Bash@3
+    displayName: Install checkov
+    inputs:
+      targetType: inline
+      script: >-
+        pip3 install
+        pip3 install checkov
+  - task: Bash@3
+    displayName: Run checkov
+    inputs:
+      targetType: inline
+      script: "terraform init\nterraform plan -var-file=\"env.tfvars\" -out tf.plan\nterraform show -json tf.plan  > tf.json \ncheckov -f tf.json --output   junitxml > $(System.DefaultWorkingDirectory)/scan-result.xml\n\npwd\ncd $(System.DefaultWorkingDirectory)\npwd\nls\ncat $(System.DefaultWorkingDirectory)/scan-result.xml\n\n\n#checkov --directory ./ --output   junitxml > $(System.DefaultWorkingDirectory)/scan-result.xml"
+      workingDirectory: tests
+  - task: PublishTestResults@2
+    displayName: Publish Checkov Results
+    inputs:
+      testResultsFiles: scan-result.xml
+   - job: Job_2
+  displayName: Terratest
+  pool:
+    name: Azure Pipelines
+  steps:
+  - checkout: self
+    clean: False
+  - task: charleszipp.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-installer.TerraformInstaller@1
+    displayName: Use Terraform latest
+  - task: GoTool@0
+    displayName: Use Go 1.23.1
+    inputs:
+      version: 1.23.1
+  - task: qetza.replacetokens.replacetokens-task.replacetokens@6
+    displayName: Replace tokens
+    inputs:
+      rootDirectory: tests
+      targetFiles: >-
+        env.tfvars
+        provider.tf
+      tokenPattern: doubleunderscores
+- task: Bash@3
+    displayName: Intsall terratest log parser
+    inputs:
+      targetType: inline
+      script: >-
+        curl -LO https://github.com/jstemmer/go-junit-report/releases/download/v2.1.0/go-junit-report-v2.1.0-linux-amd64.tar.gz
+
+        tar -xzf go-junit-report-v2.1.0-linux-amd64.tar.gz
+
+
+        ls
+
+        sudo mv go-junit-report /usr/local/bin/
+
+
+        #go list -f '{{.Target}}' github.com/jstemmer/go-junit-report
+
+        echo $PATH
+
+        export GOPATH=$HOME/go
+
+
+        go-junit-report -help
+      workingDirectory: tests
+ - task: Bash@3
+    displayName: Run Terratest
+    inputs:
+      targetType: inline
+      script: "curl -o terratest_log_parser https://github.com/gruntwork-io/terratest/releases/download/v0.13.13/terratest_log_parser_linux_amd64\n\nchmod +x terratest_log_parser\n\nsudo mv terratest_log_parser /usr/local/bin\n\ngo mod init tests/terratest\ngo mod tidy\ngo get terraform_azure_keyvault_test.go\ngo test -json terraform_azure_keyvault_test.go | go-junit-report > report.xml \n\n\n\ncat report.xml\n     \n# terratest_log_parser -testlog test_ouptut.log -outputdir $(System.DefaultWorkingDirectory)\n\nmv report.xml $(System.DefaultWorkingDirectory)\n\ncd $(System.DefaultWorkingDirectory)\nls"
+      workingDirectory: tests/terratest
+  - task: PublishTestResults@2
+    displayName: Publish Terratest results
+    inputs:
+      testResultsFiles: report.xml
